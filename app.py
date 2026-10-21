@@ -98,7 +98,7 @@ if pergunta:
             st.write(resposta)
         except Exception as e:
             print(e)  # o erro técnico fica só nos logs
-            st.session_state.msgs.pop()  # tira a pergunta falhada do histórico
+            st.error(f"Erro técnico: {e}") # tira a pergunta falhada do histórico
             st.write(ERRO)
 
 st.link_button(
