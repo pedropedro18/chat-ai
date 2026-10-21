@@ -21,7 +21,7 @@ Se não souberes algo, não inventes: sugere falar com o professor no WhatsApp.
 Responde sempre em no máximo 4 frases curtas ou uma lista breve."""
 
 # Podes definir GEMINI_MODEL nos secrets para mudar de modelo sem mexer no código
-MODELO = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+MODELO = st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash")
 URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent"
 
 ERRO = "Não consegui responder agora. Fala diretamente com o professor no WhatsApp."
