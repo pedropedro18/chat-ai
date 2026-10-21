@@ -5,7 +5,7 @@ const SISTEMA = `És o assistente virtual do "Teacher Pedro", professor de ingl�
 Respondes em português, de forma curta, simpática e clara.
 
 Cursos de inglês (níveis CEFR), preços a partir de:
-- A1 Iniciante: 8 semanas, Kz 15.000/mêsno
+- A1 Iniciante: 8 semanas, Kz 15.000/mês
 - A2 Elementar: 8 semanas, Kz 15.000/mês
 - B1 Intermédio (o mais procurado): 10 semanas, Kz 18.000/mês
 - B2 Intermédio Alto: 10 semanas, Kz 18.000/mês
@@ -16,9 +16,16 @@ Também há cursos de Excel e programação/web.
 Se não souberes algo, não inventes: sugere falar com o professor no WhatsApp.
 Responde sempre em no máximo 4 frases curtas ou uma lista breve.`;
 
-const MODELO = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODELO = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`;
 const ERRO = 'Não consegui responder agora. Fala diretamente com o professor no WhatsApp.';
+const ADMIN = process.env.ADMIN_NUMERO; // o seu número pessoal, sem +
+
+// Números que o bot nunca atende (família, pais de alunos...)
+const IGNORAR = [
+  // '244XXXXXXXXX@c.us',
+];
+
 const historicos = new Map();
 
 async function gerarResposta(chatId, texto) {
@@ -70,14 +77,27 @@ client.on('qr', qr => qrcode.generate(qr, { small: true }));
 client.on('ready', () => console.log('WhatsApp pronto!'));
 client.on('authenticated', () => console.log('Autenticado'));
 client.on('auth_failure', m => console.log('Falha de autenticação:', m));
-client.on('loading_screen', (p, msg) => console.log('A carregar', p, msg));
 client.on('disconnected', r => console.log('Desligado:', r));
 
 client.on('message', async msg => {
-  if (msg.from.endsWith('@g.us') || msg.from === 'status@broadcast') return; // ignora grupos e status
-  if (!msg.body) return;
+  if (msg.from.endsWith('@g.us') || msg.from === 'status@broadcast') return;
+  if (!msg.body || IGNORAR.includes(msg.from)) return;
+
   const resposta = await gerarResposta(msg.from, msg.body);
   await msg.reply(resposta);
+
+  // avisa o professor
+  if (ADMIN && msg.from !== `${ADMIN}@c.us`) {
+    const numero = msg.from.replace('@c.us', '');
+    try {
+      await client.sendMessage(
+        `${ADMIN}@c.us`,
+        `Novo contacto: +${numero}\nPerguntou: ${msg.body}\nBot respondeu: ${resposta}`
+      );
+    } catch (e) {
+      console.log('Falha ao avisar admin:', e.message);
+    }
+  }
 });
 
 client.initialize();
