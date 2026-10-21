@@ -5,7 +5,9 @@ const client = new Client({ authStrategy: new LocalAuth() });
 
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
 client.on('ready', () => console.log('WhatsApp pronto!'));
-
+async function gerarResposta(texto) {
+  return 'Olá! Recebi: ' + texto;
+}
 client.on('message', async msg => {
   if (msg.from.endsWith('@g.us')) return; // ignora grupos
   const resposta = await gerarResposta(msg.body); // a tua função atual
