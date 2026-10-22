@@ -1,3 +1,4 @@
+import time
 import requests
 import streamlit as st
 from urllib.parse import quote
@@ -20,9 +21,12 @@ Também há cursos de Excel e programação/web.
 Se não souberes algo, não inventes: sugere falar com o professor no WhatsApp.
 Responde sempre em no máximo 4 frases curtas ou uma lista breve."""
 
-# Podes definir GEMINI_MODEL nos secrets para mudar de modelo sem mexer no código
-MODELO = st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash")
-URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODELO}:generateContent"
+# Modelo principal + modelo de reserva (podes mudar nos secrets sem mexer no código)
+MODELOS = [
+    st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash"),
+    st.secrets.get("GEMINI_MODEL_RESERVA", "gemini-2.5-flash-lite"),
+]
+TEMPORARIOS = (429, 500, 503, 504)
 
 ERRO = "Não consegui responder agora. Fala diretamente com o professor no WhatsApp."
 
@@ -36,6 +40,36 @@ if "msgs" not in st.session_state:
             "content": "Olá! Em que posso ajudar? Pergunta sobre cursos, níveis, preços ou inscrições.",
         }
     ]
+
+
+def chamar_gemini(corpo, chave):
+    """Tenta cada modelo até 3 vezes (espera 1s, 2s) se o erro for temporário."""
+    ultimo_erro = None
+    for modelo in MODELOS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
+        for t in range(3):
+            try:
+                r = requests.post(
+                    url,
+                    headers={"x-goog-api-key": chave},
+                    json=corpo,
+                    timeout=30,
+                )
+                if r.ok:
+                    print(f"Resposta obtida com o modelo {modelo}")
+                    return r.json()
+
+                ultimo_erro = RuntimeError(
+                    f"Gemini {modelo} devolveu {r.status_code}: {r.text[:200]}"
+                )
+                print("Aviso:", ultimo_erro)
+                if r.status_code not in TEMPORARIOS:
+                    break  # erro definitivo: passa ao modelo seguinte
+            except requests.RequestException as e:
+                ultimo_erro = e  # timeout ou rede
+                print("Aviso:", e)
+            time.sleep(2**t)  # 1s, 2s, 4s
+    raise ultimo_erro
 
 
 def perguntar(historico):
@@ -54,10 +88,8 @@ def perguntar(historico):
         for m in recentes
     ]
 
-    r = requests.post(
-        URL,
-        headers={"x-goog-api-key": chave},
-        json={
+    dados = chamar_gemini(
+        {
             "systemInstruction": {"parts": [{"text": SISTEMA}]},
             "contents": contents,
             "generationConfig": {
@@ -65,13 +97,9 @@ def perguntar(historico):
                 "thinkingConfig": {"thinkingBudget": 0},
             },
         },
-        timeout=30,
+        chave,
     )
 
-    if not r.ok:
-        raise RuntimeError(f"Gemini devolveu {r.status_code}: {r.text[:300]}")
-
-    dados = r.json()
     partes = dados["candidates"][0]["content"]["parts"]
     texto = "".join(p.get("text", "") for p in partes).strip()
     if not texto:
@@ -98,7 +126,6 @@ if pergunta:
             st.write(resposta)
         except Exception as e:
             print(e)  # o erro técnico fica só nos logs
-            st.error(f"Erro técnico: {e}")# tira a pergunta falhada do histórico
             st.write(ERRO)
 
 st.link_button(
