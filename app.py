@@ -21,11 +21,12 @@ Também há cursos de Excel e programação/web.
 Se não souberes algo, não inventes: sugere falar com o professor no WhatsApp.
 Responde sempre em no máximo 4 frases curtas ou uma lista breve."""
 
-# Modelo principal + modelo de reserva (podes mudar nos secrets sem mexer no código)
+# Modelos (podes mudar nos Secrets sem mexer no código)
 MODELOS = [
-    st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash"),
+    st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
     st.secrets.get("GEMINI_MODEL_RESERVA", "gemini-2.5-flash-lite"),
 ]
+DEBUG = str(st.secrets.get("DEBUG", "false")).lower() == "true"
 TEMPORARIOS = (429, 500, 503, 504)
 
 ERRO = "Não consegui responder agora. Fala diretamente com o professor no WhatsApp."
@@ -43,7 +44,7 @@ if "msgs" not in st.session_state:
 
 
 def chamar_gemini(corpo, chave):
-    """Tenta cada modelo até 3 vezes (espera 1s, 2s) se o erro for temporário."""
+    """Tenta cada modelo até 3 vezes se o erro for temporário."""
     ultimo_erro = None
     for modelo in MODELOS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
@@ -60,19 +61,22 @@ def chamar_gemini(corpo, chave):
                     return r.json()
 
                 ultimo_erro = RuntimeError(
-                    f"Gemini {modelo} devolveu {r.status_code}: {r.text[:200]}"
+                    f"Gemini {modelo} devolveu {r.status_code}: {r.text[:300]}"
                 )
                 print("Aviso:", ultimo_erro)
                 if r.status_code not in TEMPORARIOS:
                     break  # erro definitivo: passa ao modelo seguinte
             except requests.RequestException as e:
-                ultimo_erro = e  # timeout ou rede
+                ultimo_erro = e
                 print("Aviso:", e)
-            time.sleep(2**t)  # 1s, 2s, 4s
+            if t < 2:
+                time.sleep(2**t)  # 1s, 2s
     raise ultimo_erro
 
 
 def perguntar(historico):
+    if "GEMINI_API_KEY" not in st.secrets:
+        raise RuntimeError("GEMINI_API_KEY não está nos Secrets do Streamlit Cloud")
     chave = st.secrets["GEMINI_API_KEY"]
 
     recentes = historico[1:][-10:]
@@ -100,7 +104,11 @@ def perguntar(historico):
         chave,
     )
 
-    partes = dados["candidates"][0]["content"]["parts"]
+    candidatos = dados.get("candidates") or []
+    if not candidatos:
+        raise RuntimeError(f"Sem resposta (bloqueada?): {str(dados)[:300]}")
+
+    partes = candidatos[0].get("content", {}).get("parts", [])
     texto = "".join(p.get("text", "") for p in partes).strip()
     if not texto:
         raise RuntimeError("Resposta vazia do Gemini")
@@ -125,8 +133,10 @@ if pergunta:
             st.session_state.msgs.append({"role": "assistant", "content": resposta})
             st.write(resposta)
         except Exception as e:
-            print(e)  # o erro técnico fica só nos logs
+            print(e)
             st.write(ERRO)
+            if DEBUG:
+                st.error(f"DEBUG: {e}")
 
 st.link_button(
     "Falar no WhatsApp",
