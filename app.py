@@ -23,11 +23,12 @@ Responde sempre em no máximo 4 frases curtas ou uma lista breve."""
 
 # Modelos (podes mudar nos Secrets sem mexer no código)
 MODELOS = [
-    st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash"),
-    st.secrets.get("GEMINI_MODEL_RESERVA", "gemini-2.5-flash-lite"),
+    st.secrets.get("GEMINI_MODEL", "gemini-3.8-flash"),
+    st.secrets.get("GEMINI_MODEL_RESERVA", "gemini-3.5-flash-lite"),
 ]
 DEBUG = str(st.secrets.get("DEBUG", "false")).lower() == "true"
 TEMPORARIOS = (429, 500, 503, 504)
+TENTATIVAS = 5
 
 ERRO = "Não consegui responder agora. Fala diretamente com o professor no WhatsApp."
 
@@ -44,11 +45,11 @@ if "msgs" not in st.session_state:
 
 
 def chamar_gemini(corpo, chave):
-    """Tenta cada modelo até 3 vezes se o erro for temporário."""
+    """Tenta cada modelo várias vezes se o erro for temporário."""
     ultimo_erro = None
     for modelo in MODELOS:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
-        for t in range(3):
+        for t in range(TENTATIVAS):
             try:
                 r = requests.post(
                     url,
@@ -69,8 +70,8 @@ def chamar_gemini(corpo, chave):
             except requests.RequestException as e:
                 ultimo_erro = e
                 print("Aviso:", e)
-            if t < 2:
-                time.sleep(2**t)  # 1s, 2s
+            if t < TENTATIVAS - 1:
+                time.sleep(3 * (t + 1))  # 3s, 6s, 9s, 12s
     raise ultimo_erro
 
 
@@ -98,7 +99,6 @@ def perguntar(historico):
             "contents": contents,
             "generationConfig": {
                 "maxOutputTokens": 2000,
-                "thinkingConfig": {"thinkingBudget": 0},
             },
         },
         chave,
