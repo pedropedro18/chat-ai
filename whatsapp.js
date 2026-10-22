@@ -16,8 +16,13 @@ Também há cursos de Excel e programação/web.
 Se não souberes algo, não inventes: sugere falar com o professor no WhatsApp.
 Responde sempre em no máximo 4 frases curtas ou uma lista breve.`;
 
-const MODELO = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
-const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`;
+// Modelo principal e de reserva (podes mudar no .env sem mexer no código)
+const MODELOS = [
+  process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  process.env.GEMINI_MODEL_RESERVA || 'gemini-3.5-flash-lite',
+];
+const TEMPORARIOS = [429, 500, 503, 504];
+const TENTATIVAS = 4;
 const ERRO = 'Não consegui responder agora. Fala diretamente com o professor no WhatsApp.';
 const ADMIN = process.env.ADMIN_NUMERO; // o seu número pessoal, sem +
 
@@ -28,6 +33,50 @@ const IGNORAR = [
 
 const historicos = new Map();
 
+const esperar = ms => new Promise(res => setTimeout(res, ms));
+
+// Tenta cada modelo várias vezes se o erro for temporário
+async function chamarGemini(corpo) {
+  let ultimoErro = null;
+
+  for (const modelo of MODELOS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
+
+    for (let t = 0; t < TENTATIVAS; t++) {
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': process.env.GEMINI_API_KEY,
+          },
+          body: JSON.stringify(corpo),
+        });
+
+        if (r.ok) {
+          console.log(`Resposta obtida com o modelo ${modelo}`);
+          return await r.json();
+        }
+
+        ultimoErro = new Error(
+          `Gemini ${modelo} devolveu ${r.status}: ${(await r.text()).slice(0, 300)}`
+        );
+        console.log('Aviso:', ultimoErro.message);
+
+        // erro definitivo: passa ao modelo seguinte
+        if (!TEMPORARIOS.includes(r.status)) break;
+      } catch (e) {
+        ultimoErro = e;
+        console.log('Aviso:', e.message);
+      }
+
+      if (t < TENTATIVAS - 1) await esperar(3000 * (t + 1)); // 3s, 6s, 9s
+    }
+  }
+
+  throw ultimoErro;
+}
+
 async function gerarResposta(chatId, texto) {
   const hist = historicos.get(chatId) || [];
   hist.push({ role: 'user', parts: [{ text: texto }] });
@@ -36,28 +85,16 @@ async function gerarResposta(chatId, texto) {
   while (recentes.length && recentes[0].role !== 'user') recentes.shift();
 
   try {
-    const r = await fetch(URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY,
+    const dados = await chamarGemini({
+      systemInstruction: { parts: [{ text: SISTEMA }] },
+      contents: recentes,
+      generationConfig: {
+        maxOutputTokens: 2000,
       },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SISTEMA }] },
-        contents: recentes,
-        generationConfig: {
-          maxOutputTokens: 2000,
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
     });
-    if (!r.ok) throw new Error(`Gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
 
-    const dados = await r.json();
-    const resposta = dados.candidates[0].content.parts
-      .map(p => p.text || '')
-      .join('')
-      .trim();
+    const partes = dados.candidates?.[0]?.content?.parts || [];
+    const resposta = partes.map(p => p.text || '').join('').trim();
     if (!resposta) throw new Error('Resposta vazia');
 
     hist.push({ role: 'model', parts: [{ text: resposta }] });
